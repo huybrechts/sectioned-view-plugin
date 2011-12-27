@@ -4,6 +4,7 @@ import hudson.DescriptorExtensionList;
 import hudson.ExtensionPoint;
 import hudson.model.Describable;
 import hudson.model.Hudson;
+import hudson.model.Item;
 import hudson.model.TopLevelItem;
 import hudson.util.CaseInsensitiveComparator;
 import hudson.util.EnumConverter;
@@ -48,6 +49,8 @@ public abstract class SectionedViewSection implements ExtensionPoint, Describabl
 	private Positioning alignment;
 
 	transient String css;
+
+    private volatile transient Collection<TopLevelItem> items;
 
     /**
      * Returns all the registered {@link SectionedViewSection} descriptors.
@@ -114,22 +117,27 @@ public abstract class SectionedViewSection implements ExtensionPoint, Describabl
     }
 
     public Collection<TopLevelItem> getItems() {
-        SortedSet<String> names = new TreeSet<String>(jobNames);
+        if (items == null) {
+            synchronized(this) {
+                SortedSet<String> names = new TreeSet<String>(jobNames);
 
-        if (includePattern != null) {
-            for (TopLevelItem item : Hudson.getInstance().getItems()) {
-                String itemName = item.getName();
-                if (includePattern.matcher(itemName).matches()) {
-                    names.add(itemName);
+                if (includePattern != null) {
+                    for (TopLevelItem item : Hudson.getInstance().getItems()) {
+                        String itemName = item.getName();
+                        if (includePattern.matcher(itemName).matches()) {
+                            names.add(itemName);
+                        }
+                    }
                 }
-            }
-        }
 
-        List<TopLevelItem> items = new ArrayList<TopLevelItem>(names.size());
-        for (String n : names) {
-            TopLevelItem item = Hudson.getInstance().getItem(n);
-            if(item!=null)
-                items.add(item);
+                List<TopLevelItem> items = new ArrayList<TopLevelItem>(names.size());
+                for (String n : names) {
+                    TopLevelItem item = Hudson.getInstance().getItem(n);
+                    if(item!=null)
+                        items.add(item);
+                }
+                this.items = items;
+            }
         }
         return items;
 	}
@@ -140,6 +148,10 @@ public abstract class SectionedViewSection implements ExtensionPoint, Describabl
 
     public String getCss() {
         return css;
+    }
+
+    public void clearCache() {
+        items = null;
     }
 
     /**
