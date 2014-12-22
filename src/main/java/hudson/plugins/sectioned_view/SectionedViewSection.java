@@ -29,6 +29,7 @@ import hudson.model.Describable;
 import hudson.model.Descriptor;
 import hudson.model.Hudson;
 import hudson.model.Saveable;
+import hudson.model.Item;
 import hudson.model.TopLevelItem;
 import hudson.util.CaseInsensitiveComparator;
 import hudson.util.DescribableList;
@@ -38,6 +39,7 @@ import hudson.views.ViewJobFilter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
@@ -77,6 +79,11 @@ public abstract class SectionedViewSection implements ExtensionPoint, Describabl
 	private Positioning alignment;
 
 	transient String css;
+
+	/**
+	 * This caching of items is WRONG in the presence of job-level access control
+	 */
+    private volatile transient Collection<TopLevelItem> items;
 
     /**
      * Returns all the registered {@link SectionedViewSection} descriptors.
@@ -152,30 +159,39 @@ public abstract class SectionedViewSection implements ExtensionPoint, Describabl
     }
 
     public Collection<TopLevelItem> getItems() {
-        SortedSet<String> names = new TreeSet<String>(jobNames);
+        if (items == null) {
+            synchronized(this) {
+                SortedSet<String> names = new TreeSet<String>(jobNames);
 
-        if (includePattern != null) {
-            for (TopLevelItem item : Hudson.getInstance().getItems()) {
-                String itemName = item.getName();
-                if (includePattern.matcher(itemName).matches()) {
-                    names.add(itemName);
+				final Map<String,TopLevelItem> itemMap = Hudson.getInstance().getItemMap();
+                if (includePattern != null) {
+					for (TopLevelItem item : itemMap.values()) {
+                        String itemName = item.getName();
+                        if (includePattern.matcher(itemName).matches()) {
+                            names.add(itemName);
+                        }
+                    }
                 }
+
+                List<TopLevelItem> items = new ArrayList<TopLevelItem>(names.size());
+                for (String n : names) {
+                    TopLevelItem item = itemMap.get(n);
+                    if(item!=null) {
+						items.add(item);
+					}
+                }
+
+				// check the filters
+				Iterable<ViewJobFilter> jobFilters = getJobFilters();
+				List<TopLevelItem> allItems = new ArrayList<TopLevelItem>(itemMap.values());
+				for (ViewJobFilter jobFilter: jobFilters) {
+					items = jobFilter.filter(items, allItems, null);
+				}
+
+                this.items = items;
             }
         }
 
-        List<TopLevelItem> items = new ArrayList<TopLevelItem>(names.size());
-        for (String n : names) {
-            TopLevelItem item = Hudson.getInstance().getItem(n);
-            if(item!=null)
-                items.add(item);
-        }
-
-        // check the filters
-        Iterable<ViewJobFilter> jobFilters = getJobFilters();
-        List<TopLevelItem> allItems = Hudson.getInstance().getItems();
-        for (ViewJobFilter jobFilter: jobFilters) {
-            items = jobFilter.filter(items, allItems, null);
-        }
         return items;
 	}
     
@@ -193,6 +209,10 @@ public abstract class SectionedViewSection implements ExtensionPoint, Describabl
 
     public String getCss() {
         return css;
+    }
+
+    public void clearCache() {
+        items = null;
     }
 
     /**
